@@ -26,6 +26,11 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+venv_py310/
+.vscode/
+__pycache__/
+session.log
+
 .env
 .cache
 speech_output/
