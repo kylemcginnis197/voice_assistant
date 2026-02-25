@@ -20,19 +20,18 @@ from tools.tools import TOOLS
 from audio import wait_for_wake_word, flush_queues, open_streams, wait_for_speech_start, wait_for_speech_end, mic_buffer, transcribe_audio, play_wav_file
 from config import AI_MODEL, INPUT_TOKEN_LIMIT, OUTPUT_TOKEN_LIMIT, CONVERSATION_TIMEOUT
 
+
 # End Conversation Tool
 class EndCoversation(BaseModel):
     reason: str = Field(description="Describe why you believe the user no longer requires your active listening. Regardless of the reason, calling this tool will require the user to say the wake word before getting your attention again.")
 
-
-model_state = "WAITING"
-
 def end_conversation(args: EndCoversation):
+    """End the active conversation and return to wake-word listening. Call this when the user's request is fulfilled or they are done talking."""
     global model_state
     model_state = "WAITING"
     log.log(msg=f"Model ended conversation, reason: {args.reason}")
 
-client = Model(tools=TOOLS + [end_conversation])
+client = Model(tools=TOOLS, always_included_tools=[end_conversation], web_search=True)
 client.set_model(AI_MODEL)
 client.set_input_tokens(INPUT_TOKEN_LIMIT)
 client.set_output_tokens(OUTPUT_TOKEN_LIMIT)
@@ -88,16 +87,18 @@ async def run():
 
                 await wait_for_speech_end()
 
+                ts = time.monotonic()
+
                 audio_snapshot = bytes(mic_buffer)
 
                 mic_buffer.clear()
                 flush_queues()
 
                 text = await transcribe_audio(audio_snapshot)
-                log.info(f"Transcribed: {text}")
+                log.info(f"Transcribed ({(time.monotonic() - ts):.2}s) {text}")
 
-                response = await client.call_model(text)
-                log.info(f"Model response: {response}")
+                response = await client.call_model(text, ts)
+                log.info(f"Model response ({(time.monotonic() - ts):.2}s): {response}")
 
                 if response and model_state == "LISTENING":
                     wav_path = await asyncio.to_thread(speech_obj.speak, response)

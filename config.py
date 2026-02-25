@@ -22,6 +22,10 @@ AI_MODEL = "sonnet 4.6"
 INPUT_TOKEN_LIMIT = 75_000
 OUTPUT_TOKEN_LIMIT = 4_096
 
+# Tool Embeddings Rag Model
+TOOL_EMBEDDINGS_RAG = True
+TOOL_RAG_TOP_K = 3
+
 # RVC Voice Conversion
 RVC_ENABLE = False
 RVC_MODEL_PATH = "KanyeWest808sandHeartBreakEra/KanyeWest808sandHeartBreakEra_375e_18750s.pth"
