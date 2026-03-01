@@ -1,5 +1,11 @@
 # Voice Assistant Requirements
 # Install with: pip install -r requirements.txt
+#
+# NOTE: rvc-python is NOT included here — it requires Microsoft C++ Build Tools
+# to compile on Windows and RVC is disabled by default (RVC_ENABLE = False in config.py).
+# If you want RVC voice conversion, install Build Tools first:
+# https://visualstudio.microsoft.com/visual-cpp-build-tools/
+# Then run: pip install rvc-python
 
 # Anthropic / LLM
 anthropic
@@ -15,9 +21,8 @@ openai-whisper        # imported as: import whisper
 silero-vad            # imported as: from silero_vad import ...
 openwakeword
 
-# TTS / Voice
+# TTS
 kokoro
-rvc-python            # imported as: from rvc_python.infer import ...
 
 # Web / HTTP
 httpx

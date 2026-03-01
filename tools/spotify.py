@@ -191,4 +191,7 @@ class Spotify:
         return out
 
 
-sp = Spotify()
+try:
+    sp = Spotify()
+except Exception:
+    sp = None

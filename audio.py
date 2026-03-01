@@ -168,7 +168,7 @@ def init_whisper_and_vad():
 
 def create_wake_word_model():
     """Instantiate and return an OpenWakeWord Model. Intended to be called in a background thread."""
-    oww = Model()
+    oww = Model(inference_framework="onnx")
     oww.reset()
     return oww
 

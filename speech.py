@@ -20,7 +20,11 @@ def _patched_torch_load(*args, **kwargs):
 torch.load = _patched_torch_load
 
 from kokoro import KPipeline
-from rvc_python.infer import RVCInference
+
+try:
+    from rvc_python.infer import RVCInference
+except ImportError:
+    RVCInference = None
 
 from config import (
     RECEIVE_SAMPLE_RATE,

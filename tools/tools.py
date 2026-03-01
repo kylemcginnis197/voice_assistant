@@ -8,16 +8,18 @@ TOOLS = [
 ]
 
 # Govee
-TOOLS.extend([
-    govee_controller.set_brightness,
-    govee_controller.set_color,
-    govee_controller.toggle_lights
-])
+if govee_controller:
+    TOOLS.extend([
+        govee_controller.set_brightness,
+        govee_controller.set_color,
+        govee_controller.toggle_lights
+    ])
 
-TOOLS.extend([
-    spotify.sp.start_playback,
-    spotify.sp.pause_playback,
-    spotify.sp.next_track,
-    spotify.sp.previous_track,
-    spotify.sp.search,
-])
+if spotify.sp:
+    TOOLS.extend([
+        spotify.sp.start_playback,
+        spotify.sp.pause_playback,
+        spotify.sp.next_track,
+        spotify.sp.previous_track,
+        spotify.sp.search,
+    ])

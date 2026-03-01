@@ -87,4 +87,7 @@ class Govee:
         return {"status": "Success", "updated": updated}
 
 
-govee_controller = Govee()
+try:
+    govee_controller = Govee()
+except Exception:
+    govee_controller = None
