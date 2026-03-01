@@ -39,37 +39,77 @@ voice_assistant/
 ### Prerequisites
 
 - Python 3.10
-- PyAudio (requires PortAudio system library)
 - A microphone and speaker
 
-### Installation
+### 1. Create a virtual environment
 
 ```bash
-python -m venv venv_py310
-source venv_py310/bin/activate
+python -m venv venv
+venv\Scripts\activate        # Windows
+source venv/bin/activate     # macOS/Linux
+```
+
+### 2. Install dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-### Environment Variables
+### 3. Download OpenWakeWord models
 
-Create a `.env` file in the project root:
+The wake word ONNX models are not bundled with the package and must be downloaded separately. Run this once after installing:
+
+```bash
+python -c "import openwakeword; openwakeword.utils.download_models()"
+```
+
+### 4. Create your `.env` file
+
+Copy the example and fill in your keys:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env`:
 
 ```env
+# Required
 ANTHROPIC_API_KEY=your-anthropic-api-key
 
-# Tools (optional)
+# Optional — app runs without these, tools just won't be available
 GOVEE_API_KEY=your-govee-api-key
 WEATHER_API=your-weatherapi-key
 SPOTIPY_CLIENT_ID=your-spotify-client-id
 SPOTIPY_CLIENT_SECRET=your-spotify-client-secret
-SPOTIPY_REDIRECT_URI=http://127.0.0.1:8888/callback
+SPOTIPY_REDIRECT_URI=http://localhost:8888/callback
 ```
 
-### Run
+### 5. Run
 
 ```bash
 python main.py
 ```
+
+---
+
+## Windows-Specific Notes
+
+### tflite-runtime is not available on Windows for Python 3.10
+
+OpenWakeWord defaults to TFLite models which require `tflite-runtime`. This package has no Windows wheel for Python 3.10. The code is already patched to use the ONNX backend instead (`inference_framework="onnx"`), which works fine — no action needed.
+
+### rvc-python requires Microsoft C++ Build Tools
+
+RVC voice conversion (`rvc-python`) depends on `fairseq`, which must be compiled from source on Windows. This requires [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).
+
+RVC is **disabled by default** (`RVC_ENABLE = False` in `config.py`) and the import is handled gracefully, so the assistant runs fine without it. If you want to enable RVC:
+
+1. Install [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+2. Run `pip install rvc-python`
+3. Set `RVC_ENABLE = True` in `config.py` and configure the model paths
+
+---
 
 ## Configuration
 
@@ -80,9 +120,23 @@ Key settings in `config.py`:
 | `AI_MODEL` | `sonnet 4.6` | Claude model to use |
 | `TTS_VOICE` | `am_puck` | Kokoro voice ID |
 | `TTS_SPEED` | `1.0` | Speech speed multiplier |
+| `WAKE_WORD_THRESHOLD` | `0.5` | Wake word detection sensitivity |
 | `VAD_SPEECH_THRESHOLD` | `0.65` | Voice activity detection sensitivity |
-| `CONVERSATION_TIMEOUT` | `10` | Seconds of silence before exiting conversation |
+| `SILENCE_DURATION` | `0.5` | Seconds of silence before stopping recording |
+| `CONVERSATION_TIMEOUT` | `10` | Seconds of silence before returning to wake word mode |
 | `RVC_ENABLE` | `False` | Enable RVC voice conversion |
+
+---
+
+## Known Warnings (harmless)
+
+These warnings appear on startup but do not affect functionality:
+
+- `dropout option adds dropout after all but last recurrent layer` — Silero VAD model architecture quirk, no impact
+- `torch.nn.utils.weight_norm is deprecated` — Kokoro uses an older PyTorch internal API, still works
+- `FP16 is not supported on CPU; using FP32 instead` — Whisper runs in full precision on CPU. Transcription is slower but correct. Use a CUDA GPU to eliminate this
+
+---
 
 ## How It Works
 
