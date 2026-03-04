@@ -1,4 +1,5 @@
 import spotipy
+import time
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.exceptions import SpotifyException
 from pydantic import BaseModel, Field
@@ -18,10 +19,6 @@ class SearchSpotify(BaseModel):
     search_query: Optional[str] = Field(
         description="The search query. Can be a song title, artist name, album name, podcast name, or any general search term. Leave empty string if using only field filters like artist/album/genre."
     )
-    media_types: Optional[List[str]] = Field(
-        default=["track"],
-        description="List of media types to search. Options: 'track', 'album', 'artist', 'playlist', 'show' (podcast), 'episode' (podcast episode), 'audiobook'. Defaults to ['track']. Pass multiple types to search across categories at once."
-    )
     artist: Optional[str] = Field(
         default=None,
         description="Narrow results to a specific artist. Appended as 'artist:<name>' in the Spotify query. Use when the user specifies an artist by name."
@@ -36,7 +33,7 @@ class SearchSpotify(BaseModel):
     )
     limit: int = Field(
         default=5,
-        description="Number of results to return per media type. Range 1–10. Use a higher number when the user wants to browse options; use 1 when they want to immediately play the top result."
+        description="Number of results to return per media type. Range 1–10. Use a higher limit to have more options to pick from."
     )
 
 from os import getenv
@@ -54,53 +51,139 @@ class Spotify:
             )
         )
 
+    def current_playback(self, args: BaseSpotify = None):
+        """
+        Works with the Spotify Song/Music API.
+
+        Args:
+            BaseSpotify
+
+        Returns details on whether a song is currently playing and the current song (or last song if nothing is actively playing).
+        """
+
+        try:
+            data = self.sp.current_playback()
+        except SpotifyException as e:
+            return f"Failed to get current playback state, reason: {e}"
+        
+        if data is None:
+            return "Failed to get current playback state, data is none from spotify api."
+
+        device = data.get("device", {})
+        item = data.get("item", {})
+
+        return {
+            "device": device.get("name", "N/A"),
+            "is_playing": data.get("is_playing", False),
+            "media_name": item.get("name", None),
+            "media_type": item.get("type", None),
+            "media_uri": item.get("uri", None),
+        }
+
     def pause_playback(self, args: BaseSpotify = None):
-        """Pause the user's active Spotify playback."""
+        """
+        Works with the Spotify Song/Music API.
+
+        Args:
+            BaseSpotify
+
+        Pause the user's active Spotify playback.
+        """
         try:
             self.sp.pause_playback()
         except SpotifyException as e:
             if e.http_status == 403:
                 return "Playback already paused."
             return f"Failed to pause music, reason: {e}"
+        
+        # current playback takes a little time to update.
+        time.sleep(0.2)
+
+        return {"state": "looks like action was carried out", "current_playback_state": self.current_playback()}
+
 
     def start_playback(self, args: StartPlayback):
-        """Resume the user's active Spotify playback or play songs, artists, albums, etc using a list spotify URIs obtained from search function"""
+        """
+        Works with the Spotify Song/Music API.
+
+        Args: 
+            spotify_uris: Optional[list[str]]
+
+        1. If no spotify_uris are provided, it will try to resume playback.
+        2. If spotify song uris are provided, then it will play the song for the user.
+        """
         try:
             self.sp.start_playback(uris=args.spotify_uris)
         except SpotifyException as e:
             if e.http_status == 403:
                 return "Playback already playing."
             return f"Failed to start music, reason: {e}"
+        
+        # current playback takes a little time to update.
+        time.sleep(0.2)
+
+        return {"state": "looks like action was carried out", "current_playback_state": self.current_playback()}
 
     def next_track(self, args: BaseSpotify = None):
-        """Skip to the next track in the user's Spotify queue."""
+        """
+        Works with the Spotify Song/Music API.
+
+        Args:
+            BaseSpotify
+
+        Skip to the next track in the user's Spotify queue. 
+        """
         try:
             self.sp.next_track()
         except SpotifyException as e:
             return f"Failed to skip track, reason: {e}"
 
+        # current playback takes a little time to update.
+        time.sleep(0.2)
+        
+        return {"state": "looks like action was carried out", "current_playback_state": self.current_playback()}
+
     def previous_track(self, args: BaseSpotify = None):
-        """Go back to the previous track in the user's Spotify queue."""
+        """
+        Works with the Spotify Song/Music API.
+
+        Args:
+            BaseSpotify
+
+        When the user is listening to music, it plays the last song the user listened to.
+        """
         try:
             self.sp.previous_track()
         except SpotifyException as e:
             return f"Failed to go to previous track, reason: {e}"
+        
+        # current playback takes a little time to update.
+        time.sleep(0.2)
+
+        return {"state": "looks like action was carried out", "current_playback_state": self.current_playback()}
 
     def search(self, args: SearchSpotify) -> dict:
-        """Search Spotify for tracks, albums, artists, playlists, shows, episodes, or audiobooks.
+        """
+        Works with the Spotify Song/Music API.
+        
+        Args:
+            SearchSpotify class
+        
+        Search Spotify for tracks can be filtered by artist, album, and genre.
         Returns a dict of results grouped by media type, each with a URI for playback.
         Always call this before playing something the user asked for by name.
+
+        Tip: Use a higher limit instead of making multiple tool calls.
         """
         q = args.search_query if args.search_query is not None else ""
         if args.artist: q += f" artist:{args.artist}"
         if args.album:  q += f" album:{args.album}"
         if args.genre:  q += f" genre:{args.genre}"
 
-        types = list({t.lower() for t in args.media_types if t.lower() in VALID_MEDIA_TYPES}) or ["track"]
         limit = max(1, min(10, args.limit))
 
         try:
-            results = self.sp.search(q=q, limit=limit, type=",".join(types))
+            results = self.sp.search(q=q, limit=limit, type="track")
         except SpotifyException as e:
             return {"status": "Failed", "reason": str(e)}
 
@@ -118,32 +201,18 @@ class Spotify:
                 for t in results["tracks"]["items"]
             ]
 
-        if "albums" in results:
-            out["albums"] = [
-                {
-                    "name": a["name"],
-                    "artists": [ar["name"] for ar in a["artists"]],
-                    "uri": a["uri"],
-                    "total_tracks": a["total_tracks"],
-                    "release_date": a["release_date"],
-                }
-                for a in results["albums"]["items"]
-            ]
-
-        if "artists" in results:
-            out["artists"] = [
-                {
-                    "name": a["name"],
-                    "uri": a["uri"],
-                    "genres": a.get("genres", []),
-                }
-                for a in results["artists"]["items"]
-            ]
 
         return out
 
     def get_recently_played_songs(self, args: BaseSpotify = None):
-        """Gets the previous 50 songs played on the user's spotify account. Additionally, song URI's and Album URI's can be used to play the song/album using start_playback tool"""
+        """
+        Uses the Spotify Song/Music API.
+
+        Args:
+            BaseSpotify
+
+        Gets the previous 50 songs played on the user's spotify account. Additionally, track URI's can be used to play the song using start_playback tool.
+        """
         try:
             results = self.sp.current_user_recently_played(limit=50)
         except SpotifyException as e:
@@ -177,4 +246,5 @@ class Spotify:
                     })
 
             return user_tracks
+
 sp = Spotify()

@@ -9,98 +9,19 @@ log.info(f"[STARTUP] main.py started")
 from dotenv import load_dotenv
 load_dotenv()
 
-import anthropic
 import pyaudio
 import audio as audio_module
 from model import Model
 from speech import Speech
 from pydantic import BaseModel, Field
 from typing import Optional
-from tools.tools import TOOLS, _end_conversation, _schedule_task, ScheduleTask
+from tools.tools import TOOLS, _end_conversation, _schedule_task, _start_subagent
 from audio import wait_for_wake_word, flush_queues, open_streams, wait_for_speech_start, wait_for_speech_end, mic_buffer, transcribe_audio, play_wav_file
 import config
-from config import AI_MODEL, INPUT_TOKEN_LIMIT, OUTPUT_TOKEN_LIMIT, CONVERSATION_TIMEOUT, ASSISTANT_QUEUE, SUBAGENT_MAX_RETRIES, SUBAGENT_SUPERVISOR_MODEL
-
-_supervisor_client = anthropic.AsyncAnthropic()
-
-async def run_supervisor(task_description: str, result: str) -> tuple[bool, str]:
-    """Reviews subagent output. Returns (approved, feedback_if_rejected)."""
-    response = await _supervisor_client.messages.create(
-        model=SUBAGENT_SUPERVISOR_MODEL,
-        max_tokens=256,
-        system=(
-            "You are a quality assurance supervisor for an AI assistant. "
-            "Evaluate whether the subagent fully and correctly completed the task. "
-            "Reply with exactly one of:\n"
-            "APPROVED\n"
-            "REJECTED: <brief explanation of what is missing or incorrect>"
-        ),
-        messages=[{
-            "role": "user",
-            "content": f"Task: {task_description}\n\nSubagent result:\n{result}"
-        }]
-    )
-    text = response.content[0].text.strip()
-    if text.upper().startswith("APPROVED"):
-        return True, ""
-    return False, text.removeprefix("REJECTED:").strip()
-
-async def run_subagent(task_description: str, model: str):
-    """Spawns a subagent to complete a task, with supervisor review and retries."""
-    t0 = time.monotonic()
-    log.info(f"[subagent] Starting task with model '{model}': {task_description}")
-
-    try:
-        subagent_client = Model(tools=TOOLS, always_included_tools=[], web_search=True)
-        subagent_client.set_model(model)
-        subagent_client.set_input_tokens(INPUT_TOKEN_LIMIT)
-        subagent_client.set_output_tokens(OUTPUT_TOKEN_LIMIT)
-
-        feedback = ""
-        result = None
-        total_attempts = SUBAGENT_MAX_RETRIES + 1
-
-        for attempt in range(total_attempts):
-            subagent_client.clear_context_window()
-
-            if attempt == 0:
-                attempt_prompt = f"You are a subagent tasked to perform the following: {task_description}"
-            else:
-                attempt_prompt = (
-                    f"You are a subagent tasked to perform the following: {task_description}\n\n"
-                    f"Your previous attempt was reviewed and rejected. Supervisor feedback: {feedback}\n\n"
-                    f"Please address the feedback and redo the task properly."
-                )
-
-            result = await subagent_client.call_model(input=attempt_prompt) or "No response generated."
-
-            approved, feedback = await run_supervisor(task_description, result)
-            log.info(f"[subagent] Attempt {attempt + 1}/{total_attempts}: {'approved' if approved else f'rejected — {feedback}'}")
-
-            if approved or attempt == SUBAGENT_MAX_RETRIES:
-                break
-
-        log.info(f"[subagent] Task finished ({time.monotonic() - t0:.2f}s)")
-        prompt = f"Subagent task completed.\n\nOriginal task: {task_description}\n\nResult: {result}"
-    except Exception as e:
-        log.error(f"[subagent] Task failed ({time.monotonic() - t0:.2f}s): {e}")
-        prompt = f"Subagent task failed.\n\nOriginal task: {task_description}\n\nError: {e}"
-
-    await ASSISTANT_QUEUE.put({"prompt": prompt})
-
-class SubAgent(BaseModel):
-    task_description: str = Field(description="Describe the task that your subagent needs to perform.")
-    model: str = Field(default="sonnet 4.6", description="Model for the subagent. Use 'haiku 4.5' for simple/fast tasks, 'sonnet 4.6' for tasks requiring reasoning or web search (default), 'opus 4.6' for the most complex tasks.")
-
-# Still a work in progress...
-def _start_subagent(args: SubAgent):
-    """Deploy a background subagent to perform a task autonomously. The result will be delivered back when complete."""
-    asyncio.create_task(run_subagent(task_description=args.task_description, model=args.model))
-    return f"Subagent deployed with model '{args.model}'. Task is being carried out in the background!"
-
+from config import AI_MODEL, INPUT_TOKEN_LIMIT, OUTPUT_TOKEN_LIMIT, CONVERSATION_TIMEOUT, ASSISTANT_QUEUE
 
 # Define model parameters
-client = Model(tools=TOOLS, always_included_tools=[_end_conversation, _schedule_task], web_search=True)
+client = Model(tools=TOOLS, always_included_tools=[_end_conversation, _schedule_task, _start_subagent], name="voice", web_search=True)
 client.set_model(AI_MODEL)
 client.set_input_tokens(INPUT_TOKEN_LIMIT)
 client.set_output_tokens(OUTPUT_TOKEN_LIMIT)
@@ -206,7 +127,10 @@ async def run():
 
                 # Call model
                 response = await client.call_model(text)
-                log.info(f"Model response ({(time.monotonic() - ts):.2}s): {response}")
+                log.info(f"[{client.name}] Response ({(time.monotonic() - ts):.2}s): {response}")
+
+                # After each call, output context.
+                client.dump_context_window()
 
                 # Output response via TTS if conversation is still going.
                 if response and config.ASSISTANT_STATE == "LISTENING":

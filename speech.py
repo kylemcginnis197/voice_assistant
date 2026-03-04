@@ -42,7 +42,7 @@ from log import get_logger
 
 log = get_logger("speech")
 
-OUTPUT_DIR = "speech_output"
+OUTPUT_DIR = "session"
 
 
 def _select_device() -> str:

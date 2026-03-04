@@ -1,6 +1,6 @@
 import logging
 
-LOG_FILE = "session.log"
+LOG_FILE = "session/session.log"
 
 def setup_logging():
     """Call once at startup. Configures root logger to write to stdout and session.log."""

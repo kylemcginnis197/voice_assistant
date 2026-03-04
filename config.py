@@ -11,19 +11,20 @@ CONVERSATION_TIMEOUT = 10
 SILENCE_DURATION = 1.5
 
 # Model Details
-AI_MODEL = "haiku 4.5"
+AI_MODEL = "claude-haiku-4-5-20251001"
 
 # The maximum size of the context window before the model compacts everything (via summerization)
 INPUT_TOKEN_LIMIT = 75_000
 OUTPUT_TOKEN_LIMIT = 4_096
 
 # Dynamically include tools in context window based on user query
-TOOL_EMBEDDINGS_RAG = True
+TOOL_EMBEDDINGS_RAG = False
 TOOL_RAG_TOP_K = 10
 
 # Subagent supervisor
-SUBAGENT_MAX_RETRIES = 2                                    # how many times the supervisor can reject before giving up
-SUBAGENT_SUPERVISOR_MODEL = "claude-haiku-4-5-20251001"     # model used to review subagent output
+SUBAGENT_MAX_RETRIES = 2                            # how many times the supervisor can reject before giving up
+SUBAGENT_SUPERVISOR_MODEL = "claude-sonnet-4-6"     # model used to review subagent output
+SUBAGENT_MODEL = "claude-haiku-4-5-20251001"        # model subagent performs work with.
 
 # ---------------------------------------------
 
@@ -54,7 +55,7 @@ RVC_PROTECT = 0.34      # protect voiceless consonants (0–0.5)
 
 # TTS (Kokoro)
 TTS_VOICE = "am_puck"   # kokoro voice ID
-TTS_SPEED = 1           # playback speed multiplier
+TTS_SPEED = 1.3           # playback speed multiplier
 # ---------------------------------------------
 
 # Model state ---------------------------------

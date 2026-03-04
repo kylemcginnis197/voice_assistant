@@ -77,20 +77,23 @@ class ToolRetrieval:
 
 
 class Model:
-    def __init__(self, tools: list[object], always_included_tools: list[object], web_search: bool = True) -> None:
+    def __init__(self, tools: list[object], always_included_tools: list[object], name: str = "model", web_search: bool = True) -> None:
+        self.name = name
         self.client = anthropic.AsyncAnthropic()
         self.input_token_limit = 75_000
         self.output_token_limit = 4_096
-        self.anthropic_model = "claude-sonnet-4-6-20250929"
 
         # model options
         self.beta_supported = ["claude-opus-4-6", "claude-sonnet-4-6"]
         self.web_search_supported = ["claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-4-5-20250929"]
         self.output_config_supported = ["claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-4-5-20250929"]
-        self.thinking_model = "claude-sonnet-4-6-20250929"
+        self.model = "claude-haiku-4-5-20251001"
 
         # create context window
         self.context_window = []
+
+        # organizes the data inside the context window so we can remove some
+        self.context_sections = []
 
         self.tool_references = tools
         self.always_include_tool_references = always_included_tools
@@ -135,31 +138,31 @@ class Model:
         self.context_window = []
 
     def set_input_tokens(self, tokens):
+        assert isinstance(tokens, int), f"Invalid input token parameter in config.py (must be an integer)"
         self.input_token_limit = tokens
 
     def set_output_tokens(self, tokens):
+        assert isinstance(tokens, int), f"Invalid output token parameter in config.py (must be an integer)"
         self.output_token_limit = tokens
 
     def set_model(self, model_name: str) -> None:
-        model_name = model_name.lower().strip()
+        self.model = model_name.lower().strip()
 
-        if model_name == "opus 4.6":
-            self.anthropic_model = "claude-opus-4-6"
-        elif model_name == "sonnet 4.6":
-            self.anthropic_model = "claude-sonnet-4-6"
-        elif model_name == "sonnet 4.5":
-            self.thinking_model = "claude-sonnet-4-5-20250929"
-        elif model_name == "haiku 4.5":
-            self.thinking_model = "claude-haiku-4-5-20251001"
-        else:
-            self.anthropic_model = "claude-sonnet-4-6"
+    def dump_context_window(self):
+        def _serialize(obj):
+            if hasattr(obj, "model_dump"):
+                return obj.model_dump()
+            if hasattr(obj, "__dict__"):
+                return obj.__dict__
+            return str(obj)
+
+        with open(file="session/context_window.json", mode="w") as file:
+            json.dump(self.context_window, file, default=_serialize, indent=2)
 
     async def execute_tool(self, tool_name, tool_args):
         for tool in self.tool_references + self.always_include_tool_references:
             if tool.__name__ == tool_name:
                 parameter = get_pydantic_parameters(tool)
-
-                log.info(f"Tool call: {tool.__name__} with args: {tool_args}")
 
                 try:
                     if parameter and parameter.annotation is not inspect.Parameter.empty:
@@ -168,12 +171,13 @@ class Model:
                     else:
                         response = await tool() if inspect.iscoroutinefunction(tool) else tool()
                 except Exception as e:
+                    log.info(f"[{self.name}] Failed to run {tool_name} with args: {tool_args} error: {e}")
                     return {
                         "status": "error",
                         "response": f"Failed to run {tool_name} with args: {tool_args}, error: {e}"
                     }
                 else:
-                    # print(f"tool response: {response}")
+                    log.info(f"[{self.name}] Successfully ran tool call: {tool.__name__} with args: {tool_args} response: {response}")
 
                     return {
                         "status": "success",
@@ -181,7 +185,7 @@ class Model:
                     }
         return {
             "status": "error",
-            "response": f"Failed to find tool. No tool named {tool_name} with args: {tool_args}"
+            "response": f"[{self.name}] Failed to find tool. No tool named {tool_name} with args: {tool_args}"
         }
 
     async def call_model(self, input: str) -> str:
@@ -193,10 +197,9 @@ class Model:
         })
 
         while True:
-            # print(f"context window: {self.context_window}")
             args = {}
             
-            args["model"] = self.thinking_model
+            args["model"] = self.model
             args["max_tokens"] = self.output_token_limit
             args["system"] = self.system_prompt
 
@@ -233,8 +236,8 @@ class Model:
                     }
 
             # Call model.
-            print(f"[model] Called model ({time.monotonic() - ts:.2f}s) with tools: {[tool.get('name') for tool in args['tools'] if tool.get('name', None) is not None]}")
-
+            print(f"[{self.name}] Called model ({time.monotonic() - ts:.2f}s) with tools: {[tool.get('name') for tool in args['tools'] if tool.get('name', None) is not None]}")
+            
             async with self.client.beta.messages.stream(**args) as stream:
                 response = await stream.get_final_message()
 
@@ -242,7 +245,7 @@ class Model:
             stop_reason = response.stop_reason
             content = response.content
 
-            print(f"[model] Response generated ({time.monotonic() - ts:.2f}s) input tokens: {usage.input_tokens} output tokens: {usage.output_tokens}")
+            print(f"[{self.name}] Response generated ({time.monotonic() - ts:.2f}s) input tokens: {usage.input_tokens} output tokens: {usage.output_tokens}")
 
             if stop_reason == "end_turn" or stop_reason == "max_tokens":
                 for block in content:
@@ -257,6 +260,7 @@ class Model:
                 self.context_window.append({"role": "assistant", "content": content})
 
                 tool_results = []
+                conversation_ended = False
 
                 for block in response.content:
                     if block.type == "tool_use":
@@ -264,6 +268,9 @@ class Model:
 
                         if res is None or not len(res):
                             res = "tool ran successfully."
+
+                        if block.name == "_end_conversation":       
+                            conversation_ended = True
 
                         tool_results.append({
                             "type": "tool_result",
@@ -275,6 +282,10 @@ class Model:
                     "role": "user",
                     "content": tool_results
                 })
+
+                # Agent ended convo, no need to call model again...
+                if conversation_ended:
+                    return None
             elif stop_reason == "compaction":
                 compacted_block = content[0]
                 preserved_messages = self.context_window[-4:] if len(self.context_window) > 4 else self.context_window

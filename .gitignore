@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 test_spotify_api.ipynb
+session/
 
 # C extensions
 *.so
